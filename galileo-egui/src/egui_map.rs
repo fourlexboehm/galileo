@@ -77,6 +77,7 @@ pub struct EguiMapState {
     texture_id: TextureId,
     texture_view: TextureView,
     event_processor: EventProcessor,
+    map_ready: bool,
 }
 
 impl<'a> EguiMapState {
@@ -102,6 +103,7 @@ impl<'a> EguiMapState {
         // This size will be replaced by the UI on the first frame.
         let size = Size::new(1, 1);
         map.set_size(size.cast());
+        map.set_view(map.view().with_dpi_scale_factor(ctx.pixels_per_point()));
 
         let mut renderer = WgpuRenderer::new_with_device_and_texture(
             render_state.device.clone(),
@@ -116,7 +118,7 @@ impl<'a> EguiMapState {
         let texture_id = render_state.renderer.write().register_native_texture(
             &render_state.device,
             &texture,
-            FilterMode::Linear,
+            FilterMode::Nearest,
         );
 
         let mut event_processor = EventProcessor::default();
@@ -133,6 +135,7 @@ impl<'a> EguiMapState {
             texture_id,
             texture_view: texture,
             event_processor,
+            map_ready: false,
         }
     }
 
@@ -141,13 +144,13 @@ impl<'a> EguiMapState {
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui) {
+        let logical_size = ui.available_size().floor();
         let pixels_per_point = ui.ctx().pixels_per_point();
-        let available_size = ui.available_size().floor();
-        let physical_size = available_size * pixels_per_point;
+        let physical_size = logical_size * pixels_per_point;
 
-        let (rect, response) = ui.allocate_exact_size(available_size, Sense::click_and_drag());
+        let (rect, response) = ui.allocate_exact_size(logical_size, Sense::click_and_drag());
 
-        self.map.dpi_scale_factor = pixels_per_point;
+        let renderer_size = self.renderer.size().cast::<f32>();
 
         let attributions = self.collect_attributions();
         if attributions.is_some() {
@@ -168,10 +171,15 @@ impl<'a> EguiMapState {
 
         self.map.animate();
 
-        if physical_size[0] != self.renderer.size().cast::<f32>().width()
-            || physical_size[1] != self.renderer.size().cast::<f32>().height()
-        {
-            self.resize_map(available_size, pixels_per_point);
+        if physical_size[0] != renderer_size.width() || physical_size[1] != renderer_size.height() {
+            self.map_ready = true;
+            self.resize_map(logical_size, pixels_per_point);
+            self.map
+                .set_view(self.map.view().with_dpi_scale_factor(pixels_per_point));
+        }
+
+        if self.map_ready {
+            self.map.load_layers();
         }
 
         if self.requires_redraw.swap(false, Ordering::Relaxed) {
@@ -180,7 +188,7 @@ impl<'a> EguiMapState {
 
         Image::new(ImageSource::Texture(SizedTexture::new(
             self.texture_id,
-            available_size,
+            logical_size,
         )))
         .paint_at(ui, rect);
     }
@@ -251,11 +259,20 @@ impl<'a> EguiMapState {
             .renderer
             .get_target_texture_view()
             .expect("failed to get map texture");
+
+        // Use Linear filtering for better quality on HiDPI displays
+        let filter_mode = if pixels_per_point > 1.0 {
+            FilterMode::Linear
+        } else {
+            FilterMode::Nearest
+        };
+        log::info!("Using filter mode: {filter_mode:?}");
+
         let texture_id = self
             .egui_render_state
             .renderer
             .write()
-            .register_native_texture(&self.egui_render_state.device, &texture, FilterMode::Linear);
+            .register_native_texture(&self.egui_render_state.device, &texture, filter_mode);
 
         self.texture_id = texture_id;
         self.texture_view = texture;
