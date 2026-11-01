@@ -256,9 +256,8 @@ impl<'a> EguiMapState {
                 .set_view(self.map.view().with_dpi_scale_factor(pixels_per_point));
         }
 
-        if self.map_ready {
-            self.map.load_layers();
-        }
+        // Only trigger tile preparation during actual redraws to avoid
+        // redundant work on every frame.
 
         if self.requires_redraw.swap(false, Ordering::Relaxed) {
             self.draw();

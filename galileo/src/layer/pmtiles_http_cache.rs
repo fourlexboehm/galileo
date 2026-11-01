@@ -11,6 +11,7 @@ use pmtiles::{reqwest::header::{HeaderValue, RANGE}, reqwest::{Client, Method, R
 use pmtiles::{AsyncBackend, AsyncPmTilesReader, DirectoryCache, PmtError, PmtResult};
 use sled::{Db, Tree};
 use tokio::sync::Semaphore;
+use tokio::fs;
 use std::sync::Arc;
 
 use crate::tile_schema::{TileIndex, TileSchema, VerticalDirection};
@@ -96,8 +97,8 @@ impl CachedHttpBackend {
             return Err(PmtError::ResponseBodyTooLong(response_bytes.len(), length));
         }
         let path = self.range_path(offset, length);
-        if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
-        std::fs::write(&path, &response_bytes)?;
+        if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent).await; }
+        fs::write(&path, &response_bytes).await.map_err(|e| PmtError::Reading(e))?;
         self.record_range(offset, length)?;
         Ok(response_bytes)
     }
@@ -120,7 +121,7 @@ impl AsyncBackend for CachedHttpBackend {
                     continue;
                 }
                 let file_path = self.range_path(start, len);
-                match std::fs::read(&file_path) {
+                match fs::read(&file_path).await {
                     Ok(bytes) => {
                         let take = (start_end.min(end)) - cursor;
                         let rel = cursor - start;

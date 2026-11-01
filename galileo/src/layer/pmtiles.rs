@@ -27,6 +27,7 @@ use flate2::read::GzDecoder;
 use galileo_mvt::MvtTile;
 use log::error;
 use pmtiles::{DirectoryCache, TileCoord};
+use std::path::Path;
 
 use crate::decoded_image::DecodedImage;
 use crate::error::GalileoError;
@@ -126,6 +127,31 @@ pub async fn build_vector_layer_from_url(
     style: VectorTileStyle,
 ) -> Result<VectorTileLayer, GalileoError> {
     let reader = pmtiles::AsyncPmTilesReader::new_with_cached_url(pmtiles::NoCache, client, url)
+        .await
+        .map_err(|_| GalileoError::IO)?;
+    let loader = PmtilesTileLoader::new(reader);
+    VectorTileLayerBuilder::new_pmtiles(loader, tile_schema)
+        .with_style(style)
+        .build()
+}
+
+/// Convenience helper to build a vector tile layer from a PMTiles URL using a cached HTTP backend.
+///
+/// This uses the crate’s `pmtiles_http_cache::CachedHttpBackend` to persist HTTP range responses
+/// under `cache_root`, dramatically reducing network and avoiding UI stalls on repeat reads.
+#[cfg(feature = "pmtiles")]
+pub async fn build_vector_layer_from_url_with_cache(
+    cache_root: impl AsRef<Path>,
+    client: pmtiles::reqwest::Client,
+    url: impl pmtiles::reqwest::IntoUrl,
+    tile_schema: crate::TileSchema,
+    style: VectorTileStyle,
+) -> Result<VectorTileLayer, GalileoError> {
+    use crate::layer::pmtiles_http_cache::CachedHttpBackend;
+
+    let backend = CachedHttpBackend::try_from(client, url, cache_root)
+        .map_err(|_| GalileoError::IO)?;
+    let reader = pmtiles::AsyncPmTilesReader::try_from_cached_source(backend, pmtiles::NoCache)
         .await
         .map_err(|_| GalileoError::IO)?;
     let loader = PmtilesTileLoader::new(reader);

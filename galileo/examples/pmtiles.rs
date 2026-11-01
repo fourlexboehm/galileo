@@ -4,7 +4,7 @@
 use galileo::{Lod, Map, MapBuilder, TileSchema};
 use galileo_types::cartesian::{Point2, Rect};
 use galileo_types::geo::Crs;
-use galileo::layer::pmtiles::build_vector_layer_from_url;
+use galileo::layer::pmtiles::build_vector_layer_from_url_with_cache;
 use galileo::layer::vector_tile_layer::style::VectorTileStyle;
 use pmtiles::reqwest::Client;
 
@@ -15,7 +15,15 @@ async fn main() {
         .expect("invalid style json");
     let client = Client::new();
     let url = "https://demo-bucket.protomaps.com/v4.pmtiles";
-    let vt_layer = build_vector_layer_from_url(client, url, tile_schema.clone(), style)
+    // Persist HTTP range cache under .tile_cache/pmtiles
+    let cache_root = std::path::Path::new(".tile_cache/pmtiles");
+    let vt_layer = build_vector_layer_from_url_with_cache(
+        cache_root,
+        client,
+        url,
+        tile_schema.clone(),
+        style,
+    )
         .await
         .expect("failed to create layer");
 
